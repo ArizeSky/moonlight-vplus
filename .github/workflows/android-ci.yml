@@ -45,6 +45,21 @@ jobs:
           ref: ${{ env.AUDIO_HAPTICS_SDK_REF }}
           path: .deps/moonlight-audio-haptics
 
+      - name: Patch pen input for reliable delivery
+        shell: bash
+        run: |
+          FILE="app/src/main/jni/moonlight-core/moonlight-common-c/src/InputStream.c"
+          # 触笔 MOVE 事件目前以不可靠 ENet 包发送,WiFi 突发丢包时采样被永久丢弃。
+          # 仅保留 HOVER 可丢弃;MOVE/UP/DOWN 全部改为可靠传输
+          # (等价于 moonlight-common-c PR#99 的第二处修复,保留原 1ms 限速防积压)。
+          sed -i 's/(TOUCH_EVENT_IS_BATCHABLE(eventType) && !(penButtons ^ currentPenButtonState))/(eventType == LI_TOUCH_EVENT_HOVER \&\& !(penButtons ^ currentPenButtonState))/' "$FILE"
+          if ! grep -q 'eventType == LI_TOUCH_EVENT_HOVER && !(penButtons ^ currentPenButtonState)' "$FILE"; then
+            echo "ERROR: pen patch did not apply - upstream InputStream.c changed, please review"
+            exit 1
+          fi
+          echo "Pen reliability patch applied:"
+          grep -n 'LI_TOUCH_EVENT_HOVER && !(penButtons' "$FILE"
+
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
@@ -130,7 +145,7 @@ jobs:
             app/build.gradle \
             "$VERSION" \
             "$NEW_VERSION_CODE"
-          echo "VERSION_CODE=$NEW_VERSION_CODE" >> "$GITHUB_ENV"
+          echo "VERSION_CODE=$NEW_VERSION_CODE" >> $GITHUB_ENV
           echo "Updated release version (floor was $FLOOR from $FLOOR_SRC)"
 
       - name: Build NonRoot Debug APK
@@ -313,4 +328,3 @@ jobs:
             origin \
             master \
             app/build.gradle
-
